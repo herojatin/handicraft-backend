@@ -1,26 +1,30 @@
 import express from "express";
+
 import {
   createOrder,
   getOrders,
+  getDealerOrders,
   getOrderById,
-  updateOrderStatus
+  updateOrderStatus,
 } from "../controllers/orderController.js";
 
 import { protectAdmin } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// create new order (customer)
+// CREATE ORDER - DEALER
 router.post("/", createOrder);
 
-// get all orders (admin)
+// GET DEALER ORDERS
+router.get("/dealer/:dealerEmail", getDealerOrders);
+
+// GET ALL ORDERS - ADMIN
 router.get("/", protectAdmin, getOrders);
 
-// get single order
+// GET SINGLE ORDER - ADMIN
 router.get("/:id", protectAdmin, getOrderById);
 
-// update order status (admin)
+// UPDATE ORDER STATUS - ADMIN
 router.put("/:id/status", protectAdmin, updateOrderStatus);
-
 
 export default router;

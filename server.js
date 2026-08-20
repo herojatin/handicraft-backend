@@ -23,6 +23,7 @@ import instagramRoutes from "./routes/instagramRoutes.js";
 import catalogueCategoryRoutes from "./routes/catalogueCategoryRoutes.js";
 import catalogueProductRoutes from "./routes/catalogueProductRoutes.js";
 import enquiryRoutes from "./routes/enquiryRoutes.js";
+import Dealer from "./models/dealerModel.js";
 
 import Admin from "./models/Admin.js";
 
