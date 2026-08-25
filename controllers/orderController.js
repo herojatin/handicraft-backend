@@ -98,15 +98,21 @@ export const createOrder = async (req, res) => {
       status: "Pending",
     });
 
-    const savedOrder = await order.save();
+   const savedOrder = await order.save();
 
-    console.log("ORDER SAVED:", savedOrder._id);
+console.log("========== NEW ORDER SAVED ==========");
+console.log("MODEL:", Order.modelName);
+console.log("COLLECTION:", Order.collection.name);
+console.log(
+  "SAVED ORDER:",
+  JSON.stringify(savedOrder, null, 2)
+);
 
-    return res.status(201).json({
-      success: true,
-      message: "Order created successfully.",
-      order: savedOrder,
-    });
+return res.status(201).json({
+  success: true,
+  message: "Order created successfully.",
+  order: savedOrder,
+});
 
   } catch (error) {
     console.error("========== CREATE ORDER ERROR ==========");
@@ -134,11 +140,29 @@ export const getDealerOrders = async (req, res) => {
       });
     }
 
+    console.log("========== GET DEALER ORDERS ==========");
+    console.log("Dealer email received:", dealerEmail);
+
+    // DEBUG: get every order in the database
+    const allOrders = await Order.find({});
+
     console.log(
-      "Fetching orders for dealer:",
-      dealerEmail
+      "TOTAL ORDERS IN DATABASE:",
+      allOrders.length
     );
 
+    allOrders.forEach((order) => {
+      console.log("ORDER:", {
+        id: order._id,
+        orderId: order.orderId,
+        dealerEmail: order.dealerEmail,
+        dealer: order.dealer,
+        totalQuantity: order.totalQuantity,
+        status: order.status,
+      });
+    });
+
+    // Get orders for this dealer
     const orders = await Order.find({
       dealerEmail: dealerEmail,
     }).sort({
@@ -146,7 +170,7 @@ export const getDealerOrders = async (req, res) => {
     });
 
     console.log(
-      "Dealer orders found:",
+      "ORDERS MATCHING DEALER:",
       orders.length
     );
 
