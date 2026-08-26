@@ -1,4 +1,4 @@
-import Order from "../models/orderModel.js";
+import Order from "../models/order.js";
 import Dealer from "../models/dealerModel.js";
 
 export const sendEnquiry = async (req, res) => {

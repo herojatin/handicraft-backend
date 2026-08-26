@@ -1,133 +1,65 @@
 import mongoose from "mongoose";
+import crypto from "crypto";
 import Order from "../models/order.js";
 import Dealer from "../models/dealerModel.js";
+
+// Helper for string sanitization
+const normalizeEmail = (email) => (email ? email.trim().toLowerCase() : "");
 
 // ==========================================
 // CREATE ORDER - DEALER
 // ==========================================
 export const createOrder = async (req, res) => {
   try {
-    console.log("========== CREATE ORDER ==========");
-    console.log("Request body:", req.body);
-
     const { cart, dealerEmail } = req.body;
 
     if (!cart || !Array.isArray(cart) || cart.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Cart is empty.",
-      });
+      return res.status(400).json({ success: false, message: "Cart is empty." });
     }
 
     if (!dealerEmail) {
-      return res.status(400).json({
-        success: false,
-        message: "Dealer email is required.",
-      });
+      return res.status(400).json({ success: false, message: "Dealer email is required." });
     }
 
-    console.log("Searching dealer:", dealerEmail);
-
-    const dealer = await Dealer.findOne({
-      email: dealerEmail,
-    });
-
-    console.log("Dealer found:", dealer?._id);
-
+    const dealer = await Dealer.findOne({ email: dealerEmail.trim().toLowerCase() });
     if (!dealer) {
-      return res.status(404).json({
-        success: false,
-        message: "Dealer not found.",
-      });
+      return res.status(404).json({ success: false, message: "Dealer not found." });
     }
 
-    // Calculate total quantity
-    const totalQuantity = cart.reduce(
-      (total, item) =>
-        total + Number(item.quantity || 1),
-      0
-    );
+    // Always guarantee a non-null, unique string ID BEFORE instantiate
+    const generatedOrderId = `ORD-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    // Generate order ID
-    const orderId = new mongoose.Types.ObjectId()
-      .toString()
-      .substring(0, 13);
+    const totalQuantity = cart.reduce((total, item) => total + Number(item.quantity || 1), 0);
 
-    // Prepare order items
-    const items = cart.map((item) => {
-      const productId = item._id || item.id;
-
-      if (!mongoose.Types.ObjectId.isValid(productId)) {
-        throw new Error(
-          `Invalid product ID: ${productId}`
-        );
-      }
-
-      let image = "";
-
-      if (Array.isArray(item.images)) {
-        image = item.images[0] || "";
-      } else if (item.image) {
-        image = item.image;
-      }
-
-      return {
-        productId,
-        productCode: item.productCode || "",
-        productName:
-          item.name ||
-          item.productName ||
-          item.description ||
-          "Product",
-        quantity: Number(item.quantity || 1),
-        image,
-        category: item.category || "",
-        subCategory: item.subCategory || "",
-        comment: item.comment || "",
-      };
-    });
-
-    console.log("Creating order:", orderId);
+    const items = cart.map((item) => ({
+      productId: item._id || item.id,
+      productCode: item.productCode || "",
+      productName: item.name || item.productName || item.description || "Product",
+      quantity: Number(item.quantity || 1),
+      image: Array.isArray(item.images) ? item.images[0] : (item.image || ""),
+      category: item.category || "",
+      subCategory: item.subCategory || "",
+      comment: item.comment || "",
+    }));
 
     const order = new Order({
-      orderId,
+      orderId: generatedOrderId, // Mandatory string
       dealer: dealer._id,
-      dealerEmail: dealer.email,
+      dealerEmail: dealer.email.toLowerCase(),
       items,
       totalQuantity,
       status: "Pending",
     });
 
-   const savedOrder = await order.save();
-
-console.log("========== NEW ORDER SAVED ==========");
-console.log("MODEL:", Order.modelName);
-console.log("COLLECTION:", Order.collection.name);
-console.log(
-  "SAVED ORDER:",
-  JSON.stringify(savedOrder, null, 2)
-);
-
-return res.status(201).json({
-  success: true,
-  message: "Order created successfully.",
-  order: savedOrder,
-});
-
+    const savedOrder = await order.save();
+    return res.status(201).json({ success: true, order: savedOrder });
   } catch (error) {
-    console.error("========== CREATE ORDER ERROR ==========");
-    console.error(error);
-
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    console.error("CREATE ORDER ERROR:", error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
-
-
 // ==========================================
-// GET DEALER ORDERS
+// GET DEALER ORDERS (Full Match Guarantee)
 // ==========================================
 export const getDealerOrders = async (req, res) => {
   try {
@@ -140,59 +72,42 @@ export const getDealerOrders = async (req, res) => {
       });
     }
 
-    console.log("========== GET DEALER ORDERS ==========");
-    console.log("Dealer email received:", dealerEmail);
+    const cleanEmail = decodeURIComponent(dealerEmail).trim().toLowerCase();
 
-    // DEBUG: get every order in the database
-    const allOrders = await Order.find({});
-
-    console.log(
-      "TOTAL ORDERS IN DATABASE:",
-      allOrders.length
-    );
-
-    allOrders.forEach((order) => {
-      console.log("ORDER:", {
-        id: order._id,
-        orderId: order.orderId,
-        dealerEmail: order.dealerEmail,
-        dealer: order.dealer,
-        totalQuantity: order.totalQuantity,
-        status: order.status,
-      });
+    // 1. Find dealer document first
+    const dealer = await Dealer.findOne({
+      email: { $regex: new RegExp(`^${cleanEmail}$`, "i") },
     });
 
-    // Get orders for this dealer
+    // 2. Build multi-field search conditions
+    const searchConditions = [
+      { dealerEmail: { $regex: new RegExp(cleanEmail, "i") } },
+    ];
+
+    if (dealer) {
+      searchConditions.push({ dealer: dealer._id });
+    }
+
+    // 3. Query orders
     const orders = await Order.find({
-      dealerEmail: dealerEmail,
-    }).sort({
-      createdAt: -1,
-    });
+      $or: searchConditions,
+    }).sort({ createdAt: -1 });
 
-    console.log(
-      "ORDERS MATCHING DEALER:",
-      orders.length
-    );
+    console.log(`[GET ORDERS SUCCESS] Found ${orders.length} orders for ${cleanEmail}`);
 
     return res.status(200).json({
       success: true,
+      count: orders.length,
       orders,
     });
-
   } catch (error) {
-    console.error(
-      "========== GET DEALER ORDERS ERROR =========="
-    );
-
-    console.error(error);
-
+    console.error("GET DEALER ORDERS ERROR:", error);
     return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
-
 
 // ==========================================
 // GET ALL ORDERS - ADMIN
@@ -200,125 +115,73 @@ export const getDealerOrders = async (req, res) => {
 export const getOrders = async (req, res) => {
   try {
     const orders = await Order.find()
-      .populate(
-        "dealer",
-        "firstName lastName email companyName"
-      )
-      .sort({
-        createdAt: -1,
-      });
+      .populate("dealer", "firstName lastName email companyName")
+      .sort({ createdAt: -1 });
 
-    return res.status(200).json({
-      success: true,
-      orders,
-    });
-
+    return res.status(200).json({ success: true, count: orders.length, orders });
   } catch (error) {
-    console.error(
-      "========== GET ALL ORDERS ERROR =========="
-    );
-
-    console.error(error);
-
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    console.error("GET ALL ORDERS ERROR:", error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
-
 
 // ==========================================
 // GET SINGLE ORDER
 // ==========================================
 export const getOrderById = async (req, res) => {
   try {
-    const order = await Order.findById(
-      req.params.id
-    ).populate(
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Invalid Order ID structure." });
+    }
+
+    const order = await Order.findById(id).populate(
       "dealer",
       "firstName lastName email companyName"
     );
 
     if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found.",
-      });
+      return res.status(404).json({ success: false, message: "Order not found." });
     }
 
-    return res.status(200).json({
-      success: true,
-      order,
-    });
-
+    return res.status(200).json({ success: true, order });
   } catch (error) {
-    console.error(
-      "========== GET ORDER ERROR =========="
-    );
-
-    console.error(error);
-
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    console.error("GET ORDER BY ID ERROR:", error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
-
 
 // ==========================================
 // UPDATE ORDER STATUS - ADMIN
 // ==========================================
 export const updateOrderStatus = async (req, res) => {
   try {
-    const order = await Order.findById(
-      req.params.id
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const allowedStatuses = ["Pending", "Processing", "Completed", "Cancelled"];
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: "Invalid order status." });
+    }
+
+    const updatedOrder = await Order.findByIdAndUpdate(
+      id,
+      { status },
+      { new: true, runValidators: true }
     );
 
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found.",
-      });
+    if (!updatedOrder) {
+      return res.status(404).json({ success: false, message: "Order not found." });
     }
-
-    const allowedStatuses = [
-      "Pending",
-      "Processing",
-      "Completed",
-      "Cancelled",
-    ];
-
-    if (
-      !allowedStatuses.includes(req.body.status)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid order status.",
-      });
-    }
-
-    order.status = req.body.status;
-
-    const updatedOrder = await order.save();
 
     return res.status(200).json({
       success: true,
       message: "Order status updated successfully.",
       order: updatedOrder,
     });
-
   } catch (error) {
-    console.error(
-      "========== UPDATE ORDER STATUS ERROR =========="
-    );
-
-    console.error(error);
-
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    console.error("UPDATE ORDER STATUS ERROR:", error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
