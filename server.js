@@ -29,7 +29,7 @@ import faqRoutes from "./routes/faqRoutes.js";
 
 import Admin from "./models/Admin.js";
 import s3TestRoutes from "./routes/s3TestRoutes.js";
-
+import s3ImageRoutes from "./routes/s3ImageRoutes.js";
 
 dotenv.config();
 
@@ -68,6 +68,7 @@ app.use(
   express.static(path.join(__dirname, "uploads"))
 );
 
+app.use("/uploads", s3ImageRoutes);
 // =====================================================
 // API ROUTES
 // =====================================================
