@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 
 const productSchema = new mongoose.Schema(
@@ -5,44 +6,67 @@ const productSchema = new mongoose.Schema(
     productId: {
       type: Number,
       unique: true,
+      sparse: true,
     },
 
     productCode: {
       type: String,
+      trim: true,
     },
 
     description: {
       type: String,
+      default: "",
     },
 
     category: {
       type: String,
+      trim: true,
     },
 
+    // Category.serial_id
+    category_serial_id: {
+      type: Number,
+    },
+
+    // Selected subcategory name
     subCategory: {
-      type: [String],
-      default: [],
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    // Subcategory.subcategory_serial_id
+    subcategory_serial_id: {
+      type: Number,
+      default: 0,
     },
 
     length: {
-      type: String,
+      type: Number,
+      default: 0,
     },
 
     width: {
-      type: String,
+      type: Number,
+      default: 0,
     },
 
     height: {
-      type: String,
+      type: Number,
+      default: 0,
     },
 
     quantity: {
       type: Number,
+      default: 0,
     },
 
+    // 1 = Active, 0 = Deactive
     status: {
-      type: String,
-      default: "Active",
+      type: Number,
+      enum: [0, 1],
+      default: 1,
     },
 
     images: {
@@ -52,6 +76,7 @@ const productSchema = new mongoose.Schema(
 
     createdBy: {
       type: String,
+      trim: true,
     },
   },
   {
@@ -59,7 +84,4 @@ const productSchema = new mongoose.Schema(
   }
 );
 
-export default mongoose.model(
-  "Product",
-  productSchema
-);
+export default mongoose.model("Product", productSchema);

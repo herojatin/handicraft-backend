@@ -1,61 +1,28 @@
 import multer from "multer";
-import fs from "fs";
-import path from "path";
 
 // =====================================================
-// UPLOAD DIRECTORY
+// STORAGE - MEMORY STORAGE FOR AWS S3
 // =====================================================
 
-const uploadDir = path.join(
-  process.cwd(),
-  "uploads"
-);
-
-// Create uploads folder if it doesn't exist
-
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, {
-    recursive: true,
-  });
-}
+const storage = multer.memoryStorage();
 
 // =====================================================
-// STORAGE
+// ALLOWED FILE TYPES
 // =====================================================
 
-const storage = multer.diskStorage({
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = [
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+  ];
 
-  destination: function (
-    req,
-    file,
-    cb
-  ) {
-    cb(
-      null,
-      uploadDir
-    );
-  },
-
-  filename: function (
-    req,
-    file,
-    cb
-  ) {
-    const uniqueName =
-      Date.now() +
-      "-" +
-      file.originalname.replace(
-        /\s+/g,
-        "-"
-      );
-
-    cb(
-      null,
-      uniqueName
-    );
-  },
-
-});
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error("Only JPG, PNG and WEBP images are allowed"));
+  }
+};
 
 // =====================================================
 // MULTER
@@ -63,6 +30,13 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
+
+  fileFilter,
+
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+    files: 10,
+  },
 });
 
 export default upload;

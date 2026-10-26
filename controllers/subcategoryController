@@ -1,0 +1,280 @@
+
+import mongoose from "mongoose";
+import Subcategory from "../models/Subcategory.js";
+import Category from "../models/Category.js";
+
+// ================================================
+// HELPER FUNCTIONS
+// ================================================
+
+const escapeRegex = (value) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const normalizeStatus = (status) => {
+  if (
+    status === 0 ||
+    status === "0" ||
+    status === "Deactive" ||
+    status === "Inactive"
+  ) {
+    return 0;
+  }
+
+  return 1;
+};
+
+// Find category by ObjectId, serial ID, or title
+const findCategory = async (value) => {
+  const searchValue = String(value).trim();
+
+  if (mongoose.isValidObjectId(searchValue)) {
+    const categoryById = await Category.findById(searchValue);
+
+    if (categoryById) {
+      return categoryById;
+    }
+  }
+
+  if (/^\d+$/.test(searchValue)) {
+    const categoryBySerial = await Category.findOne({
+      serial_id: Number(searchValue),
+    });
+
+    if (categoryBySerial) {
+      return categoryBySerial;
+    }
+  }
+
+  return Category.findOne({
+    title: {
+      $regex: `^${escapeRegex(searchValue)}$`,
+      $options: "i",
+    },
+  });
+};
+
+// ================================================
+// CREATE SUBCATEGORY
+// ================================================
+
+export const createSubcategory = async (req, res) => {
+  try {
+    const { category, subcategory, status } = req.body;
+
+    if (
+      category === undefined ||
+      category === null ||
+      !String(category).trim() ||
+      typeof subcategory !== "string" ||
+      !subcategory.trim()
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Category and subcategory are required",
+      });
+    }
+
+    // Find selected category
+    const existingCategory = await findCategory(category);
+
+    if (!existingCategory) {
+      return res.status(404).json({
+        success: false,
+        message: "Category not found",
+      });
+    }
+
+    if (typeof existingCategory.serial_id !== "number") {
+      return res.status(400).json({
+        success: false,
+        message: "Category serial ID is missing",
+      });
+    }
+
+    // Check duplicate using category serial ID
+    const duplicateSubcategory = await Subcategory.findOne({
+      category_serial_id: existingCategory.serial_id,
+      subcategory: {
+        $regex: `^${escapeRegex(subcategory.trim())}$`,
+        $options: "i",
+      },
+    });
+
+    if (duplicateSubcategory) {
+      return res.status(409).json({
+        success: false,
+        message: "Subcategory already exists in this category",
+      });
+    }
+
+    // Find highest subcategory serial ID
+    const lastSubcategory = await Subcategory.findOne({
+      subcategory_serial_id: { $type: "number" },
+    }).sort({
+      subcategory_serial_id: -1,
+    });
+
+    const nextSerialId = lastSubcategory
+      ? lastSubcategory.subcategory_serial_id + 1
+      : 1;
+
+    // Create subcategory
+    const newSubcategory = await Subcategory.create({
+      // Existing category reference
+      category: existingCategory._id,
+
+      // New serial-ID relationship
+      category_serial_id: existingCategory.serial_id,
+
+      subcategory: subcategory.trim(),
+
+      status: normalizeStatus(status),
+
+      product_serial_id: 0,
+
+      subcategory_serial_id: nextSerialId,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Subcategory added successfully",
+      subcategory: newSubcategory,
+    });
+
+  } catch (error) {
+    console.error("CREATE SUBCATEGORY ERROR:", error);
+
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "Duplicate serial ID. Please retry.",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// ================================================
+// GET ALL SUBCATEGORIES
+// ================================================
+
+export const getSubcategories = async (req, res) => {
+  try {
+    const subcategories = await Subcategory.find()
+      .sort({ subcategory_serial_id: 1 })
+      .lean();
+
+    const categories = await Category.find(
+      {},
+      { title: 1, serial_id: 1 }
+    ).lean();
+
+    const categoryMap = new Map(
+      categories.map((category) => [
+        category.serial_id,
+        category,
+      ])
+    );
+
+    const result = subcategories.map((sub) => ({
+      ...sub,
+      categoryDetails:
+        categoryMap.get(sub.category_serial_id) || null,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      count: result.length,
+      subcategories: result,
+    });
+
+  } catch (error) {
+    console.error("GET SUBCATEGORIES ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// ================================================
+// GET SUBCATEGORIES BY CATEGORY
+// ================================================
+
+export const getSubcategoriesByCategory = async (req, res) => {
+  try {
+    const existingCategory = await findCategory(
+      req.params.category
+    );
+
+    if (!existingCategory) {
+      return res.status(404).json({
+        success: false,
+        message: "Category not found",
+      });
+    }
+
+    if (typeof existingCategory.serial_id !== "number") {
+      return res.status(400).json({
+        success: false,
+        message: "Category serial ID is missing",
+      });
+    }
+
+    const subcategories = await Subcategory.find({
+      category_serial_id: existingCategory.serial_id,
+    }).sort({ subcategory_serial_id: 1 });
+
+    console.log("CATEGORY:", existingCategory.title);
+    console.log("CATEGORY SERIAL ID:", existingCategory.serial_id);
+    console.log("SUBCATEGORIES FOUND:", subcategories.length);
+
+    // Return an array for Addproduct.jsx
+    return res.status(200).json(subcategories);
+
+  } catch (error) {
+    console.error("GET SUBCATEGORY BY CATEGORY ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// ================================================
+// DELETE SUBCATEGORY
+// ================================================
+
+export const deleteSubcategory = async (req, res) => {
+  try {
+    const deleted = await Subcategory.findByIdAndDelete(
+      req.params.id
+    );
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Subcategory not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Subcategory deleted successfully",
+    });
+
+  } catch (error) {
+    console.error("DELETE SUBCATEGORY ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};

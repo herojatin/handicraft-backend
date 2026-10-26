@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 
 const categorySchema = new mongoose.Schema(
@@ -5,20 +6,29 @@ const categorySchema = new mongoose.Schema(
     title: {
       type: String,
       required: true,
+      trim: true,
     },
 
     image: {
       type: String,
+      default: "",
     },
 
     status: {
-      type: String,
-      enum: ["Active", "Deactive"],
-      default: "Active",
+      type: Number,
+      enum: [0, 1],
+      default: 1,
+    },
+
+    serial_id: {
+      type: Number,
     },
   },
   {
-    timestamps: true,
+    timestamps: {
+      createdAt: "created_at",
+      updatedAt: "updated_at",
+    },
   }
 );
 

@@ -22,16 +22,14 @@ export const protectAdmin = (req, res, next) => {
 
     next();
   } catch (error) {
+    console.error("JWT Error:", error.message);
+
     return res.status(401).json({
       success: false,
       message: "Invalid or expired token.",
     });
   }
 };
-
-// ================================
-// ROLE AUTHORIZATION
-// ================================
 
 export const authorizeRoles = (...roles) => {
   return (req, res, next) => {

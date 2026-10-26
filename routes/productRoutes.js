@@ -1,3 +1,4 @@
+
 import express from "express";
 
 import {
@@ -15,13 +16,26 @@ import upload from "../middleware/uploadMiddleware.js";
 
 const router = express.Router();
 
-// GET PRODUCTS
+// ================================================
+// GET ALL PRODUCTS - PUBLIC
+// ================================================
+
+router.get("/", getProducts);
+
+// ================================================
+// GET ALL PRODUCTS - ADMIN
+// ================================================
+
 router.get(
-  "/",
+  "/admin",
+  protectAdmin,
   getProducts
 );
 
+// ================================================
 // CREATE PRODUCT
+// ================================================
+
 router.post(
   "/",
   protectAdmin,
@@ -29,7 +43,10 @@ router.post(
   createProduct
 );
 
-// UPDATE PRODUCT
+// ================================================
+// UPDATE PRODUCT - ADMIN
+// ================================================
+
 router.put(
   "/admin/:id",
   protectAdmin,
@@ -37,9 +54,33 @@ router.put(
   updateProduct
 );
 
-// DELETE PRODUCT
+// ================================================
+// UPDATE PRODUCT
+// ================================================
+
+router.put(
+  "/:id",
+  protectAdmin,
+  upload.array("images", 10),
+  updateProduct
+);
+
+// ================================================
+// DELETE PRODUCT - ADMIN
+// ================================================
+
 router.delete(
   "/admin/:id",
+  protectAdmin,
+  deleteProduct
+);
+
+// ================================================
+// DELETE PRODUCT
+// ================================================
+
+router.delete(
+  "/:id",
   protectAdmin,
   deleteProduct
 );

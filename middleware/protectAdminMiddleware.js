@@ -9,10 +9,11 @@ export const protectAdmin = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
-    if (
-      !authHeader ||
-      !authHeader.startsWith("Bearer ")
-    ) {
+    console.log("===== ADMIN AUTH DEBUG =====");
+    console.log("Authorization Header:", authHeader ? "Token received" : "NO TOKEN");
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      console.log("❌ No Bearer token");
       return res.status(401).json({
         success: false,
         message: "No token provided",
@@ -21,30 +22,41 @@ export const protectAdmin = async (req, res, next) => {
 
     const token = authHeader.split(" ")[1];
 
+    console.log("Token received:", !!token);
+    console.log("JWT_SECRET exists:", !!process.env.JWT_SECRET);
+
     const decoded = jwt.verify(
       token,
       process.env.JWT_SECRET
     );
 
+    console.log("Decoded Token:", decoded);
+
     req.admin = await Admin.findById(
       decoded.id
     ).select("-password");
 
+    console.log(
+      "Admin found:",
+      req.admin ? req.admin.email : "NO ADMIN"
+    );
+
     if (!req.admin) {
+      console.log("❌ Admin not found for ID:", decoded.id);
+
       return res.status(401).json({
         success: false,
         message: "Admin not found",
       });
     }
 
+    console.log("✅ Admin authentication successful");
+    console.log("============================");
+
     next();
 
   } catch (error) {
-
-    console.error(
-      "JWT Error:",
-      error.message
-    );
+    console.error("❌ JWT Error:", error.message);
 
     return res.status(401).json({
       success: false,

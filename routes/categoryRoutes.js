@@ -4,25 +4,18 @@ import upload from "../middleware/uploadMiddleware.js";
 import {
   createCategory,
   getCategories,
-  deleteCategory
+  deleteCategory,
 } from "../controllers/categoryController.js";
 
 const router = express.Router();
 
-router.post(
-  "/",
-  upload.single("image"),
-  createCategory
-);
+// CREATE CATEGORY
+router.post("/", upload.single("image"), createCategory);
 
-router.get(
-  "/",
-  getCategories
-);
+// GET ALL CATEGORIES
+router.get("/", getCategories);
 
-router.delete(
-  "/:id",
-  deleteCategory
-);
+// DELETE CATEGORY
+router.delete("/:id", deleteCategory);
 
 export default router;
