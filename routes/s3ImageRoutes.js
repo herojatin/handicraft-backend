@@ -1,12 +1,13 @@
 import express from "express";
-
-import {
-  GetObjectCommand,
-} from "@aws-sdk/client-s3";
-
+import path from "path";
+import { GetObjectCommand } from "@aws-sdk/client-s3";
 import s3 from "../config/s3.js";
 
 const router = express.Router();
+
+// ==========================================
+// GET IMAGE FROM AWS S3
+// ==========================================
 
 router.get("/:filename", async (req, res) => {
   try {
@@ -19,11 +20,16 @@ router.get("/:filename", async (req, res) => {
       filename.includes("/") ||
       filename.includes("\\")
     ) {
-      return res.status(400).send("Invalid filename");
+      return res.status(400).json({
+        success: false,
+        message: "Invalid filename",
+      });
     }
 
-    // Your existing S3 structure
     const key = `uploads/${filename}`;
+
+    console.log("IMAGE REQUEST:", filename);
+    console.log("S3 KEY:", key);
 
     const command = new GetObjectCommand({
       Bucket: process.env.AWS_S3_BUCKET_NAME,
@@ -32,10 +38,35 @@ router.get("/:filename", async (req, res) => {
 
     const response = await s3.send(command);
 
-    // Send correct image content type
+    // Determine image MIME type
+    const extension = path.extname(filename).toLowerCase();
+
+    const mimeTypes = {
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".png": "image/png",
+      ".webp": "image/webp",
+      ".gif": "image/gif",
+      ".svg": "image/svg+xml",
+      ".avif": "image/avif",
+    };
+
+    const contentType =
+      mimeTypes[extension] ||
+      response.ContentType ||
+      "application/octet-stream";
+
+    // Force browser to display image instead of downloading
+    res.setHeader("Content-Type", contentType);
+
     res.setHeader(
-      "Content-Type",
-      response.ContentType || "image/jpeg"
+      "Content-Disposition",
+      "inline"
+    );
+
+    res.setHeader(
+      "X-Content-Type-Options",
+      "nosniff"
     );
 
     res.setHeader(
@@ -43,9 +74,22 @@ router.get("/:filename", async (req, res) => {
       "public, max-age=3600"
     );
 
-    // Stream image directly from S3
+    if (response.ContentLength !== undefined) {
+      res.setHeader(
+        "Content-Length",
+        response.ContentLength
+      );
+    }
+
+    if (!response.Body) {
+      return res.status(404).json({
+        success: false,
+        message: "Image body is empty",
+      });
+    }
+
     response.Body.on("error", (error) => {
-      console.error("S3 IMAGE STREAM ERROR:", error);
+      console.error("S3 STREAM ERROR:", error);
       res.destroy(error);
     });
 
@@ -65,10 +109,17 @@ router.get("/:filename", async (req, res) => {
       error.name === "NoSuchKey" ||
       error.name === "NotFound"
     ) {
-      return res.status(404).send("Image not found");
+      return res.status(404).json({
+        success: false,
+        message: "Image not found in AWS S3",
+      });
     }
 
-    return res.status(500).send("Unable to load image");
+    return res.status(500).json({
+      success: false,
+      message: "Failed to retrieve image",
+      error: error.name,
+    });
   }
 });
 

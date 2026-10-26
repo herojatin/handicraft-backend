@@ -4,6 +4,7 @@ import path from "path";
 import Product from "../models/Product.js";
 import Subcategory from "../models/Subcategory.js";
 import Category from "../models/Category.js";
+
 import uploadToS3 from "../utils/uploadToS3.js";
 import { getS3ImageUrl } from "../utils/getS3ImageUrl.js";
 
@@ -16,17 +17,23 @@ import { getS3ImageUrl } from "../utils/getS3ImageUrl.js";
 // 2. Arrays of images
 // 3. JSON-formatted image arrays
 const normalizeImages = (value) => {
-  if (value == null || value === "") return [];
+  if (value == null || value === "") {
+    return [];
+  }
 
   if (Array.isArray(value)) {
     return value.flatMap(normalizeImages);
   }
 
-  if (typeof value !== "string") return [];
+  if (typeof value !== "string") {
+    return [];
+  }
 
   const raw = value.trim();
 
-  if (!raw) return [];
+  if (!raw) {
+    return [];
+  }
 
   if (raw.startsWith("[")) {
     try {
@@ -46,7 +53,9 @@ const normalizeImages = (value) => {
     .filter(Boolean);
 };
 
-const parseImageList = normalizeImages;
+// =====================================================
+// NORMALIZE SUBCATEGORIES
+// =====================================================
 
 const normalizeSubcategories = (value) => {
   if (
@@ -69,7 +78,7 @@ const normalizeSubcategories = (value) => {
         return parsed.map(String).filter(Boolean);
       }
     } catch {
-      // Treat as one subcategory.
+      // Treat as a single subcategory.
     }
 
     return [value];
@@ -77,6 +86,10 @@ const normalizeSubcategories = (value) => {
 
   return [];
 };
+
+// =====================================================
+// NORMALIZE STATUS
+// =====================================================
 
 const normalizeStatus = (status) => {
   if (
@@ -90,6 +103,10 @@ const normalizeStatus = (status) => {
   return 1;
 };
 
+// =====================================================
+// GET LOCAL IMAGE PATH
+// =====================================================
+
 const getImagePath = (image) => {
   const filename = path.basename(
     String(image).replace(/\\/g, "/")
@@ -102,8 +119,13 @@ const getImagePath = (image) => {
   );
 };
 
-// Deletes legacy local files only.
-// This does not delete AWS S3 objects.
+// =====================================================
+// DELETE LEGACY LOCAL IMAGE FILES
+// =====================================================
+
+// Only deletes local files.
+// Does not delete AWS S3 objects.
+
 const deleteImageFiles = (images) => {
   for (const image of normalizeImages(images)) {
     try {
@@ -159,50 +181,92 @@ const getSubcategorySerialId = async (
 };
 
 // =====================================================
-// GENERATE AWS S3 SIGNED URLS FOR ALL IMAGES
+// NORMALIZE S3 OBJECT KEY
+// =====================================================
+
+// Examples:
+//
+// products/image.png
+// uploads/DI 2206.JPG
+// /uploads/DI 2206.JPG
+//
+// The object key must match the actual key in S3.
+
+const normalizeS3Key = (image) => {
+  if (!image || typeof image !== "string") {
+    return "";
+  }
+
+  return image
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
+};
+
+// =====================================================
+// GENERATE SIGNED URL FOR ONE IMAGE
+// =====================================================
+
+const generateImageUrl = async (image) => {
+  try {
+    if (!image || typeof image !== "string") {
+      return "";
+    }
+
+    // Preserve existing complete URLs.
+    if (/^https?:\/\//i.test(image)) {
+      return image;
+    }
+
+    const key = normalizeS3Key(image);
+
+    if (!key) {
+      return "";
+    }
+
+    const signedUrl = await getS3ImageUrl(key);
+
+    return signedUrl || "";
+
+  } catch (error) {
+    console.error(
+      "S3 IMAGE URL ERROR:",
+      image,
+      error.message
+    );
+
+    return "";
+  }
+};
+
+// =====================================================
+// GENERATE SIGNED URLS FOR ALL PRODUCT IMAGES
 // =====================================================
 
 const withSignedImages = async (product) => {
-  const images = normalizeImages(product.images);
+  const productData =
+    typeof product.toObject === "function"
+      ? product.toObject()
+      : product;
 
-  const imageUrls = await Promise.all(
-    images.map(async (image) => {
-      if (!image) return "";
-
-      if (/^https?:\/\//i.test(image)) {
-        return image;
-      }
-
-      try {
-        const signedUrl = await getS3ImageUrl(image);
-        return signedUrl || "";
-      } catch (error) {
-        console.error(
-          "S3 IMAGE URL ERROR:",
-          image,
-          error
-        );
-        return "";
-      }
-    })
+  const images = normalizeImages(
+    productData.images
   );
 
-  const validImageUrls = imageUrls.filter(Boolean);
+  // Keep URLs aligned with the original image order.
+  const imageUrls = await Promise.all(
+    images.map(generateImageUrl)
+  );
 
   return {
-    ...(typeof product.toObject === "function"
-      ? product.toObject()
-      : product),
+    ...productData,
     images,
-    imageUrls:
-      validImageUrls.length > 0
-        ? validImageUrls
-        : images,
+    imageUrls,
   };
 };
 
 // =====================================================
-// GET PRODUCTS — SEARCH + PAGINATION
+// GET PRODUCTS
 // =====================================================
 
 export const getProducts = async (req, res) => {
@@ -211,34 +275,21 @@ export const getProducts = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    const productsWithImages = await Promise.all(
-      products.map(async (product) => {
-        const images = Array.isArray(product.images)
-          ? product.images
-          : product.images
-            ? [product.images]
-            : [];
-
-        const imageUrls = await Promise.all(
-          images.map(async (image) => {
-            return await getS3ImageUrl(image);
-          })
-        );
-
-        return {
-          ...product,
-          images,
-          imageUrls,
-        };
-      })
-    );
+    const productsWithImages =
+      await Promise.all(
+        products.map(withSignedImages)
+      );
 
     return res.status(200).json({
       success: true,
       products: productsWithImages,
     });
+
   } catch (error) {
-    console.error("GET PRODUCTS ERROR:", error);
+    console.error(
+      "GET PRODUCTS ERROR:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
@@ -269,11 +320,20 @@ const extractS3Key = (result) => {
   return null;
 };
 
-const uploadMultipleImagesToS3 = async (files = []) => {
+// =====================================================
+// UPLOAD MULTIPLE IMAGES TO AWS S3
+// =====================================================
+
+const uploadMultipleImagesToS3 = async (
+  files = []
+) => {
   const uploadedImages = [];
 
   for (const file of files) {
-    const result = await uploadToS3(file, "products");
+    const result = await uploadToS3(
+      file,
+      "products"
+    );
 
     const key = extractS3Key(result);
 
@@ -289,15 +349,23 @@ const uploadMultipleImagesToS3 = async (files = []) => {
   return uploadedImages;
 };
 
-// Store images according to your Mongoose schema.
-// String  => "products/a.jpg,products/b.jpg"
-// [String] => ["products/a.jpg", "products/b.jpg"]
+// =====================================================
+// FORMAT IMAGES FOR MONGODB
+// =====================================================
+
+// Supports both:
+//
+// images: ["products/a.jpg", "products/b.jpg"]
+//
+// images: "products/a.jpg,products/b.jpg"
+
 const formatImagesForDatabase = (images) => {
   const uniqueImages = [
     ...new Set(normalizeImages(images)),
   ];
 
-  const imageSchema = Product.schema.path("images");
+  const imageSchema =
+    Product.schema.path("images");
 
   if (imageSchema?.instance === "Array") {
     return uniqueImages;
@@ -306,9 +374,9 @@ const formatImagesForDatabase = (images) => {
   return uniqueImages.join(",");
 };
 
-
-// CREATE PRODUCT - MULTIPLE AWS S3 IMAGES
-
+// =====================================================
+// CREATE PRODUCT
+// =====================================================
 
 export const createProduct = async (req, res) => {
   try {
@@ -345,44 +413,53 @@ export const createProduct = async (req, res) => {
         selectedSubcategories
       );
 
-    // =================================================
-    // UPLOAD MULTIPLE IMAGES TO AWS S3
-    // =================================================
+    // =============================================
+    // UPLOAD IMAGES TO AWS S3
+    // =============================================
 
     const uploadedImages =
-      await uploadMultipleImagesToS3(req.files || []);
+      await uploadMultipleImagesToS3(
+        req.files || []
+      );
 
-    // Save S3 keys, not local file paths.
+    // Save S3 object keys in MongoDB.
     const images = formatImagesForDatabase(
       uploadedImages
     );
 
-    // =================================================
+    // =============================================
     // CREATE PRODUCT IN MONGODB
-    // =================================================
+    // =============================================
 
     const product = await Product.create({
-  productId,
-  productCode: productCode.trim(),
-  description,
-  category,
+      productId,
 
-  // MongoDB schema expects a string, not an array.
-  // Empty selection becomes an empty string.
-  subCategory: selectedSubcategories.join(", "),
+      productCode: productCode.trim(),
 
-  subcategory_serial_id: subcategorySerialId,
+      description,
 
-  length,
-  width,
-  height,
-  quantity: Number(quantity || 0),
-  status: normalizeStatus(status),
-  createdBy,
-  images,
-});
+      category,
 
-    // Generate signed image URLs for frontend.
+      subCategory:
+        selectedSubcategories.join(", "),
+
+      subcategory_serial_id:
+        subcategorySerialId,
+
+      length,
+      width,
+      height,
+
+      quantity: Number(quantity || 0),
+
+      status: normalizeStatus(status),
+
+      createdBy,
+
+      images,
+    });
+
+    // Generate signed URLs for the frontend.
     const productWithImages =
       await withSignedImages(product);
 
@@ -391,8 +468,12 @@ export const createProduct = async (req, res) => {
       message: "Product created successfully",
       product: productWithImages,
     });
+
   } catch (error) {
-    console.error("CREATE PRODUCT ERROR:", error);
+    console.error(
+      "CREATE PRODUCT ERROR:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
@@ -400,12 +481,9 @@ export const createProduct = async (req, res) => {
     });
   }
 };
-// =====================================================
-// UPDATE PRODUCT
-// =====================================================
 
 // =====================================================
-// UPDATE PRODUCT - MULTIPLE AWS S3 IMAGES
+// UPDATE PRODUCT
 // =====================================================
 
 export const updateProduct = async (req, res) => {
@@ -435,9 +513,9 @@ export const updateProduct = async (req, res) => {
       removedImages,
     } = req.body;
 
-    // =================================================
+    // =============================================
     // CATEGORY AND SUBCATEGORY
-    // =================================================
+    // =============================================
 
     const selectedCategory =
       category ?? product.category;
@@ -445,7 +523,9 @@ export const updateProduct = async (req, res) => {
     const selectedSubcategories =
       subCategory !== undefined
         ? normalizeSubcategories(subCategory)
-        : normalizeSubcategories(product.subCategory);
+        : normalizeSubcategories(
+            product.subCategory
+          );
 
     if (
       category !== undefined ||
@@ -458,53 +538,55 @@ export const updateProduct = async (req, res) => {
         );
     }
 
-    // =================================================
+    // =============================================
     // GET EXISTING IMAGES
-    // =================================================
-
-    // Supports:
-    // "uploads/DI 01535.JPG,uploads/DI 01535A.JPG"
-    // ["products/a.jpg", "products/b.jpg"]
+    // =============================================
 
     const storedImages = normalizeImages(
       product.images
     );
 
-    // Existing images can be sent from frontend.
-    // Only images already belonging to this product are accepted.
     const requestedExisting =
       existingImages !== undefined
         ? normalizeImages(existingImages)
         : storedImages;
 
-    const storedSet = new Set(storedImages);
-
-    const validExisting = requestedExisting.filter(
-      (image) => storedSet.has(image)
+    const storedSet = new Set(
+      storedImages
     );
 
-    // =================================================
+    // Only accept existing images that already
+    // belong to this product.
+    const validExisting =
+      requestedExisting.filter(
+        (image) => storedSet.has(image)
+      );
+
+    // =============================================
     // REMOVE SELECTED IMAGES
-    // =================================================
+    // =============================================
 
     const imagesToRemove = new Set(
       normalizeImages(removedImages)
     );
 
-    const keptImages = validExisting.filter(
-      (image) => !imagesToRemove.has(image)
-    );
+    const keptImages =
+      validExisting.filter(
+        (image) => !imagesToRemove.has(image)
+      );
 
-    // =================================================
+    // =============================================
     // UPLOAD NEW IMAGES TO AWS S3
-    // =================================================
+    // =============================================
 
     const newImages =
-      await uploadMultipleImagesToS3(req.files || []);
+      await uploadMultipleImagesToS3(
+        req.files || []
+      );
 
-    // =================================================
+    // =============================================
     // MERGE EXISTING + NEW IMAGES
-    // =================================================
+    // =============================================
 
     const finalImages = [
       ...new Set([
@@ -513,17 +595,16 @@ export const updateProduct = async (req, res) => {
       ]),
     ];
 
-    // Save using the format defined in Product schema.
-    product.images = formatImagesForDatabase(
-      finalImages
-    );
+    product.images =
+      formatImagesForDatabase(finalImages);
 
-    // =================================================
+    // =============================================
     // UPDATE PRODUCT FIELDS
-    // =================================================
+    // =============================================
 
     if (productCode !== undefined) {
-      product.productCode = productCode.trim();
+      product.productCode =
+        productCode.trim();
     }
 
     if (description !== undefined) {
@@ -534,9 +615,10 @@ export const updateProduct = async (req, res) => {
       product.category = category;
     }
 
-   if (subCategory !== undefined) {
-  product.subCategory = selectedSubcategories.join(", ");
-}
+    if (subCategory !== undefined) {
+      product.subCategory =
+        selectedSubcategories.join(", ");
+    }
 
     if (length !== undefined) {
       product.length = length;
@@ -555,26 +637,34 @@ export const updateProduct = async (req, res) => {
     }
 
     if (status !== undefined) {
-      product.status = normalizeStatus(status);
+      product.status = normalizeStatus(
+        status
+      );
     }
 
-    // =================================================
+    // =============================================
     // SAVE UPDATED PRODUCT
-    // =================================================
+    // =============================================
 
-    const updatedProduct = await product.save();
+    const updatedProduct =
+      await product.save();
 
-    // Generate signed URLs for all remaining images.
     const productWithImages =
-      await withSignedImages(updatedProduct);
+      await withSignedImages(
+        updatedProduct
+      );
 
     return res.status(200).json({
       success: true,
       message: "Product updated successfully",
       product: productWithImages,
     });
+
   } catch (error) {
-    console.error("UPDATE PRODUCT ERROR:", error);
+    console.error(
+      "UPDATE PRODUCT ERROR:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
@@ -582,6 +672,7 @@ export const updateProduct = async (req, res) => {
     });
   }
 };
+
 // =====================================================
 // DELETE PRODUCT
 // =====================================================
@@ -600,21 +691,23 @@ export const deleteProduct = async (req, res) => {
       });
     }
 
-    const images =
-      normalizeImages(product.images);
+    const images = normalizeImages(
+      product.images
+    );
 
     await Product.findByIdAndDelete(
       req.params.id
     );
 
-    // Deletes legacy local files only.
-    // AWS S3 objects are not deleted here.
+    // Delete legacy local files only.
+    // S3 objects are not deleted.
     deleteImageFiles(images);
 
     return res.status(200).json({
       success: true,
       message: "Product deleted successfully",
     });
+
   } catch (error) {
     console.error(
       "DELETE PRODUCT ERROR:",
