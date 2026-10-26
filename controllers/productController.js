@@ -207,197 +207,42 @@ const withSignedImages = async (product) => {
 
 export const getProducts = async (req, res) => {
   try {
-    const page = Math.max(
-      1,
-      parseInt(req.query.page, 10) || 1
-    );
+    const products = await Product.find()
+      .sort({ createdAt: -1 })
+      .lean();
 
-    const limit = Math.min(
-      100,
-      Math.max(
-        1,
-        parseInt(req.query.limit, 10) || 12
-      )
-    );
+    const productsWithImages = await Promise.all(
+      products.map(async (product) => {
+        const images = Array.isArray(product.images)
+          ? product.images
+          : product.images
+            ? [product.images]
+            : [];
 
-    const search = String(
-      req.query.search || ""
-    ).trim();
-
-    const status = String(
-      req.query.status || ""
-    )
-      .toLowerCase()
-      .trim();
-
-    const filter = {};
-
-    // ACTIVE / INACTIVE FILTER
-    if (
-      status === "active" ||
-      status === "1"
-    ) {
-      filter.status = 1;
-    }
-
-    if (
-      ["inactive", "deactive", "0"].includes(status)
-    ) {
-      filter.status = 0;
-    }
-
-    // SEARCH PRODUCTS
-    if (search) {
-      const escaped = search.replace(
-        /[.*+?^${}()|[\]\\]/g,
-        "\\$&"
-      );
-
-      const regex = new RegExp(
-        escaped,
-        "i"
-      );
-
-      const conditions = [];
-
-      // Search string fields available in the schema.
-      for (const field of [
-        "productCode",
-        "productName",
-        "name",
-        "title",
-        "category",
-        "description",
-      ]) {
-        if (
-          Product.schema.path(field)?.instance ===
-          "String"
-        ) {
-          conditions.push({
-            [field]: regex,
-          });
-        }
-      }
-
-      // Search subcategories.
-      const subCategoryType =
-        Product.schema.path("subCategory")
-          ?.instance;
-
-      if (
-        subCategoryType === "String" ||
-        subCategoryType === "Array"
-      ) {
-        conditions.push({
-          subCategory: regex,
-        });
-      }
-
-      // Search numeric product ID.
-      if (
-        /^\d+$/.test(search) &&
-        Product.schema.path("productId")
-          ?.instance === "Number"
-      ) {
-        conditions.push({
-          productId: Number(search),
-        });
-      }
-
-      // Search by subcategory serial ID.
-      if (
-        Product.schema.path(
-          "subcategory_serial_id"
-        )
-      ) {
-        const matches =
-          await Subcategory.find({
-            subcategory: regex,
+        const imageUrls = await Promise.all(
+          images.map(async (image) => {
+            return await getS3ImageUrl(image);
           })
-            .select("subcategory_serial_id")
-            .lean();
+        );
 
-        const serialIds = matches
-          .map((item) =>
-            Number(
-              item.subcategory_serial_id
-            )
-          )
-          .filter(Number.isFinite);
-
-        if (serialIds.length) {
-          conditions.push({
-            subcategory_serial_id: {
-              $in: serialIds,
-            },
-          });
-        }
-      }
-
-      filter.$or = conditions.length
-        ? conditions
-        : [
-            {
-              _id: {
-                $exists: false,
-              },
-            },
-          ];
-    }
-
-    // COUNT AND FETCH PRODUCTS
-    const [totalProducts, products] =
-      await Promise.all([
-        Product.countDocuments(filter),
-
-        Product.find(filter)
-          .sort({ _id: -1 })
-          .skip((page - 1) * limit)
-          .limit(limit)
-          .lean(),
-      ]);
-
-    // GENERATE SIGNED S3 URLS
-    const productsWithImages =
-      await Promise.all(
-        products.map(withSignedImages)
-      );
-
-    const totalPages = Math.ceil(
-      totalProducts / limit
+        return {
+          ...product,
+          images,
+          imageUrls,
+        };
+      })
     );
-
-    console.log("GET PRODUCTS:", {
-      page,
-      limit,
-      search,
-      status,
-      totalProducts,
-      returnedProducts: products.length,
-    });
 
     return res.status(200).json({
       success: true,
       products: productsWithImages,
-
-      pagination: {
-        page,
-        limit,
-        totalProducts,
-        totalPages,
-        hasNextPage: page < totalPages,
-        hasPreviousPage: page > 1,
-      },
     });
   } catch (error) {
-    console.error(
-      "GET PRODUCTS ERROR:",
-      error
-    );
+    console.error("GET PRODUCTS ERROR:", error);
 
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Failed to fetch products",
     });
   }
 };
