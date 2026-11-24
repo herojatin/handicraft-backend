@@ -269,56 +269,77 @@ const withSignedImages = async (product) => {
 // GET PRODUCTS
 // =====================================================
 
+
+
+
 export const getProducts = async (req, res) => {
   try {
-    const products = await Product.find()
-      .sort({ createdAt: -1 })
+    const search = String(req.query.search || "").trim();
+
+    const filter = {};
+
+    if (search) {
+      const escapedSearch = search.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&"
+      );
+
+      filter.productCode = {
+        $regex: escapedSearch,
+        $options: "i",
+      };
+    }
+
+    // Check database connection and collection
+    const databaseInfo = {
+      database: Product.db.name,
+      collection: Product.collection.name,
+      connectionState: Product.db.readyState,
+    };
+
+    // Direct test against the database
+    const testProduct = await Product.findOne({
+      productCode: { $regex: "MO", $options: "i" },
+    })
+      .select("productCode description category")
       .lean();
 
-    const productsWithImages =
-      await Promise.all(
-        products.map(withSignedImages)
-      );
+    // Actual search
+    const [products, totalProducts] = await Promise.all([
+      Product.find(filter)
+        .sort({ createdAt: -1 })
+        .lean(),
+
+      Product.countDocuments(filter),
+    ]);
+
+    const productsWithImages = await Promise.all(
+      products.map(withSignedImages)
+    );
 
     return res.status(200).json({
       success: true,
+      diagnostics: {
+        database: databaseInfo,
+        requestedSearch: search,
+        directMOTest: testProduct,
+        matchedProducts: totalProducts,
+      },
       products: productsWithImages,
     });
 
   } catch (error) {
-    console.error(
-      "GET PRODUCTS ERROR:",
-      error
-    );
+    console.error("GET PRODUCTS ERROR:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch products",
+      message: error.message,
     });
   }
 };
 
-// =====================================================
-// AWS S3 MULTIPLE IMAGE HELPERS
-// =====================================================
 
-const extractS3Key = (result) => {
-  if (typeof result === "string") {
-    return result;
-  }
 
-  if (result && typeof result === "object") {
-    return (
-      result.key ||
-      result.Key ||
-      result.s3Key ||
-      result.path ||
-      null
-    );
-  }
-
-  return null;
-};
 
 // =====================================================
 // UPLOAD MULTIPLE IMAGES TO AWS S3

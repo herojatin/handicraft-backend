@@ -302,7 +302,12 @@ const startServer = async () => {
     console.log("Connecting to MongoDB...");
 
     await connectDB();
+    console.log("CONNECTED DATABASE:", mongoose.connection.name);
+    console.log("PRODUCT COLLECTION:", mongoose.connection.collection("products").collectionName);
 
+    const productCount = await mongoose.connection.collection("products").countDocuments();
+
+    console.log("TOTAL PRODUCTS IN DATABASE:", productCount);
     console.log("MongoDB connection successful");
 
     await createAdmin();

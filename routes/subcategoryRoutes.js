@@ -157,8 +157,12 @@ router.post("/", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const subcategories = await Subcategory.find()
-      .sort({ subcategory_serial_id: 1 })
-      .lean();
+  .sort({ subcategory: 1 })
+  .collation({
+    locale: "en",
+    strength: 2,
+  })
+  .lean();
 
     // Resolve parent category using serial ID
     const categories = await Category.find(
@@ -194,6 +198,10 @@ router.get("/", async (req, res) => {
 // GET SUBCATEGORIES BY CATEGORY
 // ================================================
 
+// ================================================
+// GET SUBCATEGORIES BY CATEGORY (A-Z)
+// ================================================
+
 router.get("/:category", async (req, res) => {
   try {
     const existingCategory = await findCategory(
@@ -207,23 +215,36 @@ router.get("/:category", async (req, res) => {
       });
     }
 
-    if (typeof existingCategory.serial_id !== "number") {
-      return res.status(400).json({
-        success: false,
-        message: "Category serial ID is missing",
+    const conditions = [
+      { category: existingCategory._id },
+    ];
+
+    // Also support category_serial_id
+    if (typeof existingCategory.serial_id === "number") {
+      conditions.push({
+        category_serial_id: existingCategory.serial_id,
       });
     }
 
-    // IMPORTANT: Relation using serial ID
     const subcategories = await Subcategory.find({
-      category_serial_id: existingCategory.serial_id,
-    }).sort({ subcategory_serial_id: 1 });
+      $or: conditions,
+    })
+      .sort({
+        subcategory: 1,
+      })
+      .collation({
+        locale: "en",
+        strength: 2,
+      })
+      .lean();
 
     console.log("CATEGORY:", existingCategory.title);
+    console.log("CATEGORY ID:", existingCategory._id);
     console.log("SERIAL ID:", existingCategory.serial_id);
     console.log("SUBCATEGORIES FOUND:", subcategories.length);
 
     return res.status(200).json(subcategories);
+
   } catch (error) {
     console.error("GET SUBCATEGORY ERROR:", error);
 
